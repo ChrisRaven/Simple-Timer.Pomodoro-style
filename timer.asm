@@ -1,5 +1,4 @@
 ; Simple 25-minute countdown timer in Win32 Assembly using FASM
-; Features:
 ; - Window size approximately 200x100 client area, always on top
 ; - Large countdown display
 ; - START/RESET button
@@ -15,6 +14,7 @@ ID_BUTTON = 1001
 ID_STATIC = 1002
 ID_TIMER_COUNTDOWN = 1
 ID_TIMER_FLASH = 2
+TIMER_LENGTH = 1500  ; 25 minutes in seconds
 
 ; Data section
 section '.data' data readable writeable
@@ -35,8 +35,9 @@ section '.data' data readable writeable
   hbutton dd ?
   hfont dd ?
 
-  time_left dd 1500  ; 25 minutes in seconds
+  time_left dd TIMER_LENGTH
   is_running db 0
+  is_initial_state db 1  ; 1 if button says "START" (initial or reset state), 0 if "RESET"
   flash_count db 0
   flash_on db 0
 
@@ -157,14 +158,15 @@ proc WndProc hwnd:DWORD, wmsg:DWORD, wparam:DWORD, lparam:DWORD
   cmp eax, ID_BUTTON
   jne .done_command
 
-  cmp [is_running], 0
+  cmp [is_initial_state], 1
   je .start_timer
 
-  ; Reset
-  mov [time_left], 1500
+  ; Reset (during countdown, flashing, or at 00:00)
+  mov [time_left], TIMER_LENGTH
   stdcall UpdateTime
   invoke SetWindowText, [hbutton], szStart
   mov [is_running], 0
+  mov [is_initial_state], 1
   invoke KillTimer, [hwnd], ID_TIMER_COUNTDOWN
   invoke KillTimer, [hwnd], ID_TIMER_FLASH
   mov [flash_count], 0
@@ -173,8 +175,12 @@ proc WndProc hwnd:DWORD, wmsg:DWORD, wparam:DWORD, lparam:DWORD
   jmp .done_command
 
 .start_timer:
+  ; Start countdown from initial or reset state
+  mov [time_left], TIMER_LENGTH
+  stdcall UpdateTime
   invoke SetWindowText, [hbutton], szReset
   mov [is_running], 1
+  mov [is_initial_state], 0
   invoke KillTimer, [hwnd], ID_TIMER_FLASH
   mov [flash_count], 0
   mov [flash_on], 0
@@ -194,16 +200,21 @@ proc WndProc hwnd:DWORD, wmsg:DWORD, wparam:DWORD, lparam:DWORD
   jmp .done_timer
 
 .countdown:
+  cmp [time_left], 0
+  jle .stop_countdown
   dec [time_left]
   stdcall UpdateTime
-  cmp [time_left], 0
-  jg .done_timer
+  jmp .done_timer
+
+.stop_countdown:
   invoke KillTimer, [hwnd], ID_TIMER_COUNTDOWN
   mov [is_running], 0
-  invoke SetWindowText, [hbutton], szStart
+  invoke SetWindowText, [hbutton], szReset
+  mov [is_initial_state], 0
   mov [flash_count], 10  ; Flash 5 times (on/off)
   mov [flash_on], 1
   invoke SetTimer, [hwnd], ID_TIMER_FLASH, 200, 0
+  stdcall UpdateTime
   jmp .done_timer
 
 .flash:
@@ -260,7 +271,6 @@ endp
 
 ; Import section
 section '.idata' import data readable writeable
-
   library kernel32, 'KERNEL32.DLL', \
           user32, 'USER32.DLL', \
           gdi32, 'GDI32.DLL'
